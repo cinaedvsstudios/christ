@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Studio v2.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    
+    <style>
+        /* Print Layout Constraints */
+        @media print {
+            .no-print, .resize-handle, .block-controls { display: none !important; }
+            body { background: white !important; color: black !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+            .resume-canvas, #atsWorkspace { box-shadow: none !important; border: none !important; margin: 0 !important; padding: 0 !important; width: 100% !important; max-width: 100% !important; }
+            
+            .grid-container-print {
+                display: grid !important;
+                grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+                gap: 1.5rem !important;
+            }
+            .sidebar-print { grid-column: span 1 / span 1 !important; }
+            .main-print { grid-column: span 2 / span 2 !important; }
+            
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            .print-page-break {
+                display: block !important;
+                page-break-before: always !important;
+                break-before: page !important;
+                height: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+            }
+        }
+        
+        /* App Layout Architecture Constraints */
+        body { overflow: hidden; }
+        .sortable-ghost { opacity: 0.3; background-color: #f0fdf4; border: 2px dashed #22c55e !important; }
+        
+        /* Outer block layer ALWAYS allows handles to render outside boundaries */
+        .resume-block { 
+            position: relative !important; 
+            border: 2px solid transparent; 
+            overflow: visible !important; 
+            display: block !important;
+            /* Default Bullet Point Variables */
+            --bullet-color: #0ea5e9; 
+            --bullet-size: 1.2em;
+        }
+        
+        /* Inner container wrapper clips content safely when manually resized smaller than text */
+        .inner-clip-wrapper {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Selection Highlight Box styling */
+        .active-block-anchor { 
+            border: 2px solid #a855f7 !important; 
+            box-shadow: 0 0 12px rgba(168, 85, 247, 0.25) !important; 
+        }
+
+        /* Un-vanishing Control Badge System */
+        .block-controls {
+            position: absolute;
+            top: -24px;
+            right: 4px;
+            background-color: #7c3aed !important;
+            color: #ffffff !important;
+            font-size: 10px !important;
+            font-weight: bold !important;
+            padding: 2px 8px !important;
+            border-radius: 4px 4px 0 0 !important;
+            z-index: 200 !important;
+            cursor: move;
+            display: none;
+            box-shadow: 0 -2px 6px rgba(0,0,0,0.2);
+            white-space: nowrap;
+        }
+        .resume-block:hover .block-controls,
+        .active-block-anchor .block-controls {
+            display: block !important;
+        }
+
+        /* Enhanced High-Visibility Geometric Corner Handles */
+        .resize-handle {
+            position: absolute;
+            width: 14px; 
+            height: 14px;
+            background-color: #ffffff !important;
+            border: 3px solid #7c3aed; 
+            z-index: 210 !important;
+            display: none;
+            border-radius: 9999px; 
+            box-shadow: 0 1px 5px rgba(0,0,0,0.35);
+        }
+        .resume-block:hover .resize-handle,
+        .active-block-anchor .resize-handle {
+            display: block !important;
+        }
+        
+        .handle-tl { top: -7px; left: -7px; cursor: nwse-resize; }
+        .handle-tr { top: -7px; right: -7px; cursor: nesw-resize; }
+        .handle-bl { bottom: -7px; left: -7px; cursor: nesw-resize; }
+        .handle-br { bottom: -7px; right: -7px; cursor: nwse-resize; }
+
+        /* Custom Bullet Rendering decoupled from Line Height & Double-dot Masking */
+        .resume-block ul, .resume-block ul li {
+            list-style: none !important;
+            list-style-type: none !important;
+        }
+        .resume-block ul {
+            padding-left: 1.25rem;
+            margin-top: 0.25rem;
+            margin-bottom: 0.25rem;
+        }
+        .resume-block li {
+            position: relative;
+        }
+        .resume-block li::before {
+            content: "•";
+            position: absolute;
+            left: -1rem;
+            top: -0.15em; 
+            color: var(--bullet-color);
+            font-size: var(--bullet-size);
+            line-height: 1.5em; 
+            display: inline-block;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-gray-100 font-sans antialiased h-screen w-screen flex flex-row">
+
+    <aside class="no-print w-80 h-full bg-slate-950 border-r border-slate-800 p-4 flex flex-col gap-4 overflow-y-auto shrink-0 z-50">
+        <div>
+            <h1 class="text-md font-extrabold text-white tracking-wide flex items-center gap-1.5">
+                <span>🎨</span> Resume Studio <span class="text-xs px-2 py-0.5 bg-purple-900 text-purple-300 rounded font-mono font-normal">v2.0</span>
+            </h1>
+            <p class="text-[11px] text-slate-400 mt-0.5">Manage block styles, text sizing vectors, and component metrics.</p>
+        </div>
+
+        <div id="inspectorPanel" class="bg-slate-900 border-2 border-purple-500/60 p-3 rounded-xl shadow-lg hidden mb-auto">
+            <div class="flex justify-between items-center mb-2.5">
+                <h2 class="text-[11px] font-bold text-purple-400 uppercase tracking-wider">🎛️ Element Inspector</h2>
+                <span class="text-[9px] bg-purple-950 text-purple-300 px-1.5 py-0.5 rounded font-mono font-bold" id="inspectorBlockType">TEXT</span>
+            </div>
+            
+            <div class="space-y-3 text-xs">
+                
+                <div class="space-y-2 bg-slate-950 p-2 rounded border border-slate-800">
+                    <p class="font-bold text-emerald-400 text-[10px] uppercase tracking-wide">📐 Precision Geometry (PX)</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex flex-col gap-1 text-slate-400 text-[10px]">Width (px)
+                            <input type="number" id="geomWidth" oninput="updateActiveBlockGeometry('width', this.value)" class="w-full bg-slate-800 text-white rounded p-1 border border-slate-700 font-mono text-xs" />
+                        </label>
+                        <label class="flex flex-col gap-1 text-slate-400 text-[10px]">Height (px)
+                            <input type="number" id="geomHeight" oninput="updateActiveBlockGeometry('height', this.value)" class="w-full bg-slate-800 text-white rounded p-1 border border-slate-700 font-mono text-xs" />
+                        </label>
+                    </div>
+                </div>
+
+                <div id="inspectorTextControls" class="space-y-2 bg-slate-950 p-2 rounded border border-slate-800">
+                    <p class="font-bold text-amber-400 text-[10px] uppercase tracking-wide">✨ Selection Customizer</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="applySelectionInlineStyle('bold')" class="py-1 bg-slate-800 hover:bg-slate-700 rounded font-bold text-white border border-slate-700 text-[11px]">Bold</button>
+                        <button onclick="applySelectionInlineStyle('italic')" class="py-1 bg-slate-800 hover:bg-slate-700 rounded italic text-white border border-slate-700 text-[11px]">Italic</button>
+                    </div>
+                    
+                    <div class="space-y-1 pt-1">
+                        <span class="text-slate-400 text-[10px] block">Text Alignment:</span>
+                        <div class="grid grid-cols-4 gap-1">
+                            <button onclick="applySelectionInlineStyle('justifyLeft')" class="bg-slate-800 hover:bg-slate-700 text-[10px] py-1 rounded border border-slate-700 text-center">Left</button>
+                            <button onclick="applySelectionInlineStyle('justifyCenter')" class="bg-slate-800 hover:bg-slate-700 text-[10px] py-1 rounded border border-slate-700 text-center">Center</button>
+                            <button onclick="applySelectionInlineStyle('justifyRight')" class="bg-slate-800 hover:bg-slate-700 text-[10px] py-1 rounded border border-slate-700 text-center">Right</button>
+                            <button onclick="applySelectionInlineStyle('justifyFull')" class="bg-slate-800 hover:bg-slate-700 text-[10px] py-1 rounded border border-slate-700 text-center">Full</button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between pt-1">
+                        <span class="text-slate-400 text-[11px]">Selection Color:</span>
+                        <input type="color" oninput="applySelectionInlineStyle('foreColor', this.value)" class="w-10 h-6 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" />
+                    </div>
+                    <div class="flex flex-col gap-1 pt-1">
+                        <span class="text-slate-400 text-[11px]">Selection Font Size:</span>
+                        <select onchange="applySelectionInlineStyle('fontSize', this.value)" class="w-full bg-slate-800 text-white text-xs rounded p-1 border border-slate-700">
+                            <option value="2">Small (13px)</option>
+                            <option value="3" selected>Normal (16px)</option>
+                            <option value="4">Medium-Large (18px)</option>
+                            <option value="5">Large Headline (24px)</option>
+                            <option value="6">Extra Large (32px)</option>
+                            <option value="7">Hero Title (48px)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="inspectorListControls" class="space-y-2 bg-slate-950 p-2 rounded border border-slate-800">
+                    <p class="font-bold text-pink-400 text-[10px] uppercase tracking-wide">📝 Bullet Points Options</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex flex-col gap-1 text-slate-400 text-[10px]">Bullet Color
+                            <input type="color" id="bulletColor" value="#0ea5e9" oninput="applyListStyles()" class="w-full h-6 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" />
+                        </label>
+                        <label class="flex flex-col gap-1 text-slate-400 text-[10px]">Bullet Size (em)
+                            <input type="number" id="bulletSize" step="0.1" value="1.2" oninput="applyListStyles()" class="w-full bg-slate-800 text-white rounded p-1 border border-slate-700 font-mono text-xs" />
+                        </label>
+                    </div>
+                    <button onclick="applySelectionInlineStyle('insertUnorderedList')" class="w-full mt-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] py-1.5 rounded border border-slate-700 transition font-bold">
+                        Toggle List on Selected Text
+                    </button>
+                </div>
+
+                <div class="space-y-2 bg-slate-950 p-2 rounded border border-slate-800">
+                    <p class="font-bold text-cyan-400 text-[10px] uppercase tracking-wide border-b border-slate-800 pb-1">🌌 Box Shadow FX</p>
+                    <div class="flex items-center justify-between mt-1">
+                        <span class="text-slate-400 text-[10px]">Shadow Color:</span>
+                        <input type="color" id="boxShadowColor" value="#000000" oninput="applyBlockEffectsMatrix()" class="w-8 h-5 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" />
+                    </div>
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-[10px] text-slate-400">
+                            <span>Feather / Blur:</span>
+                            <span id="boxBlurDisplay" class="font-mono text-cyan-400">0px</span>
+                        </div>
+                        <input type="range" id="boxShadowBlur" min="0" max="30" value="0" oninput="applyBlockEffectsMatrix()" class="w-full accent-cyan-500 bg-slate-800 h-1 rounded" />
+                    </div>
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-[10px] text-slate-400">
+                            <span>Shadow Opacity:</span>
+                            <span id="boxOpacityDisplay" class="font-mono text-cyan-400">40%</span>
+                        </div>
+                        <input type="range" id="boxShadowOpacity" min="0" max="100" value="40" oninput="applyBlockEffectsMatrix()" class="w-full accent-cyan-500 bg-slate-800 h-1 rounded" />
+                    </div>
+
+                    <p class="font-bold text-cyan-400 text-[10px] uppercase tracking-wide border-b border-slate-800 pb-1 pt-2">🔤 Text Shadow FX</p>
+                    <div class="flex items-center gap-2 mt-1">
+                        <input type="checkbox" id="enableTextShadow" onchange="applyBlockEffectsMatrix()" class="accent-cyan-500 cursor-pointer"> 
+                        <span class="text-slate-400 text-[10px]">Enable Shadow for Text</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-slate-400 text-[10px]">Shadow Color:</span>
+                        <input type="color" id="textShadowColor" value="#000000" oninput="applyBlockEffectsMatrix()" class="w-8 h-5 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" />
+                    </div>
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-[10px] text-slate-400">
+                            <span>Feather / Blur:</span>
+                            <span id="textBlurDisplay" class="font-mono text-cyan-400">0px</span>
+                        </div>
+                        <input type="range" id="textShadowBlur" min="0" max="30" value="0" oninput="applyBlockEffectsMatrix()" class="w-full accent-cyan-500 bg-slate-800 h-1 rounded" />
+                    </div>
+                </div>
+
+                <div class="space-y-2 bg-slate-950 p-2 rounded border border-slate-800">
+                    <p class="font-semibold text-slate-400 text-[11px]">📦 Container Styles</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex flex-col gap-1 text-slate-400 text-[10px]">Box Fill
+                            <input type="color" id="sidebarBlockBg" oninput="modifyActiveBlockShellStyle('bg', this.value)" class="w-full h-6 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" />
+                        </label>
+                        <label class="flex flex-col gap-1 text-slate-400 text-[10px]">Box Border
+                            <input type="color" id="sidebarBlockBorder" oninput="modifyActiveBlockShellStyle('border', this.value)" class="w-full h-6 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" />
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between pt-1 border-t border-slate-800 mt-1">
+                        <span class="text-slate-400 text-[10px]">Corner Handle Color:</span>
+                        <input type="color" id="sidebarHandleColor" value="#7c3aed" oninput="modifyActiveBlockShellStyle('handles', this.value)" class="w-8 h-5 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" />
+                    </div>
+                </div>
+
+                <div class="pt-1 flex flex-col gap-1.5">
+                    <button onclick="restoreAutoContainerFlow()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] py-1.5 rounded border border-slate-700 transition font-bold">
+                        🔄 Reset Box Constraints (Auto Flow)
+                    </button>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="duplicateActiveContainerBlock()" class="bg-blue-950 text-blue-300 hover:bg-blue-900 text-[11px] py-1.5 rounded transition font-medium">📋 Duplicate</button>
+                        <button onclick="purgeActiveContainerBlock()" class="bg-red-950 text-red-300 hover:bg-red-900 text-[11px] py-1.5 rounded transition font-medium">🗑️ Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <section class="flex-1 h-full overflow-y-auto p-8 flex justify-center items-start bg-slate-900">
+        
+        <div id="visualWorkspace" class="bg-white text-slate-800 p-8 rounded-xl shadow-2xl resume-canvas w-full max-w-[8.5in] min-h-[11in] flex flex-col gap-6 border border-gray-200">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 items-stretch grid-container-print">
+                <div id="canvasSidebar" class="column-container md:col-span-1 border border-transparent rounded-xl p-3 flex flex-col gap-4 min-h-[400px] sidebar-print">
+                    <div class="text-center text-gray-400 text-xs py-8 no-print border-2 border-dashed border-gray-200 rounded-lg select-none">Sidebar Container</div>
+                </div>
+                <div id="canvasMain" class="column-container md:col-span-2 border border-transparent rounded-xl p-3 flex flex-col gap-4 min-h-[400px] main-print">
+                    <div class="text-center text-gray-400 text-xs py-8 no-print border-2 border-dashed border-gray-200 rounded-lg select-none">Primary Body Container</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="atsWorkspace" class="hidden bg-white text-slate-900 p-12 rounded-xl shadow-2xl w-full max-w-[8.5in] min-h-[11in] flex flex-col gap-4 border border-gray-300 font-serif"></div>
+
+    </section>
+
+    <aside class="no-print w-80 h-full bg-slate-950 border-l border-slate-800 p-4 flex flex-col gap-4 overflow-y-auto shrink-0 z-50">
+        
+        <div class="bg-slate-900 border border-slate-800 p-2 rounded-xl shadow-md grid grid-cols-2 gap-2">
+            <button onclick="undoState()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold py-1.5 px-2 rounded border border-slate-700 transition shadow text-center">↩️ Undo</button>
+            <button onclick="redoState()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold py-1.5 px-2 rounded border border-slate-700 transition shadow text-center">↪️ Redo</button>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl shadow-md space-y-2">
+            <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">💾 Workspace Configurations</h3>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="saveProjectWorkspace()" class="bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold py-1.5 px-2 rounded transition shadow text-center">Save Studio JSON</button>
+                <div class="relative bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold py-1.5 px-2 rounded transition shadow text-center cursor-pointer">
+                    Load JSON Map
+                    <input type="file" accept=".json" onchange="loadProjectWorkspace(event)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                </div>
+            </div>
+            
+            <button id="atsToggleBtn" onclick="toggleLayoutEngine()" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-lg text-xs shadow transition-all flex items-center justify-center gap-1.5">
+                <span>🤖</span> Generate ATS Text Engine
+            </button>
+            
+            <div class="bg-slate-950 rounded-lg p-2 border border-slate-800 text-[11px] space-y-1">
+                <label class="font-bold text-amber-400 block">⚡ Ingest Resume (PDF / TXT):</label>
+                <input type="file" id="fileInput" accept=".txt,.pdf" class="w-full text-slate-400 text-[10px] file:mr-2 file:py-0.5 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-amber-500 file:text-slate-950 hover:file:bg-amber-600 cursor-pointer" />
+            </div>
+
+            <button onclick="window.print()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg text-xs shadow transition-all block text-center">
+                🖨️ Export PDF / Print Page
+            </button>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl shadow-md">
+            <h2 class="text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-2">🏰 Column Layout Styles</h2>
+            <div class="space-y-2 text-xs">
+                <div class="p-2 bg-slate-950 rounded border border-slate-800">
+                    <p class="font-semibold text-slate-300 mb-1 text-[10px]">Left Column Matrix</p>
+                    <div class="flex items-center justify-between">
+                        <label class="flex items-center gap-1 cursor-pointer text-[10px] text-slate-400">BG: <input type="color" value="#f8fafc" oninput="adjustMasterColumnMatrix('canvasSidebar', 'bg', this.value)" class="w-5 h-5 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" /></label>
+                        <label class="flex items-center gap-1 cursor-pointer text-[10px] text-slate-400">Border: <input type="color" value="#e2e8f0" oninput="adjustMasterColumnMatrix('canvasSidebar', 'border', this.value)" class="w-5 h-5 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" /></label>
+                    </div>
+                </div>
+                <div class="p-2 bg-slate-950 rounded border border-slate-800">
+                    <p class="font-semibold text-slate-300 mb-1 text-[10px]">Right Column Matrix</p>
+                    <div class="flex items-center justify-between">
+                        <label class="flex items-center gap-1 cursor-pointer text-[10px] text-slate-400">BG: <input type="color" value="#ffffff" oninput="adjustMasterColumnMatrix('canvasMain', 'bg', this.value)" class="w-5 h-5 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" /></label>
+                        <label class="flex items-center gap-1 cursor-pointer text-[10px] text-slate-400">Border: <input type="color" value="#e2e8f0" oninput="adjustMasterColumnMatrix('canvasMain', 'border', this.value)" class="w-5 h-5 p-0 border border-slate-700 bg-transparent cursor-pointer rounded" /></label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl shadow-lg flex-1 flex flex-col mt-auto">
+            <div class="mb-3">
+                <h2 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">🧱 Component Toolbox</h2>
+                <p class="text-[10px] text-slate-500">Click a structural block module to insert it seamlessly.</p>
+            </div>
+            <div class="space-y-2 overflow-y-auto flex-1 pr-1">
+                <button onclick="createNewComponent('photo', 'canvasSidebar')" class="w-full bg-slate-950 hover:bg-slate-850 border border-slate-800 p-2 rounded text-left text-xs font-medium flex items-center gap-2 text-slate-200 transition">🖼️ Profile Photo Block</button>
+                <button onclick="createNewComponent('name', 'canvasMain')" class="w-full bg-slate-950 hover:bg-slate-850 border border-slate-800 p-2 rounded text-left text-xs font-medium flex items-center gap-2 text-slate-200 transition">📛 Name & Title Header</button>
+                <button onclick="createNewComponent('contact', 'canvasSidebar')" class="w-full bg-slate-950 hover:bg-slate-850 border border-slate-800 p-2 rounded text-left text-xs font-medium flex items-center gap-2 text-slate-200 transition">📞 Contact Information Card</button>
+                <button onclick="createNewComponent('divider', 'canvasMain')" class="w-full bg-slate-950 hover:bg-slate-850 border border-slate-800 p-2 rounded text-left text-xs font-medium flex items-center gap-2 text-slate-200 transition">➖ Structural Divider Line</button>
+                <button onclick="createNewComponent('textBlock', 'canvasMain')" class="w-full bg-slate-950 hover:bg-slate-850 border border-slate-800 p-2 rounded text-left text-xs font-medium flex items-center gap-2 text-slate-200 transition">📄 Free Content Text Block</button>
+                <button onclick="createNewComponent('pageBreak', 'canvasMain')" class="w-full bg-purple-950/40 hover:bg-purple-900/40 border border-purple-800/60 p-2 rounded text-left text-xs font-bold flex items-center gap-2 text-purple-300 transition">✂️ Insert Hard Page Break</button>
+            </div>
+        </div>
+        
+        <div id="statusAlert" class="bg-slate-950 border border-slate-800 p-2.5 rounded-xl text-[10px] text-amber-400 hidden font-mono leading-tight"></div>
+    </aside>
+
+    <div id="blueprintRepository" class="hidden">
+        <div class="resume-block p-3 rounded-lg group" data-type="photo" style="width: 100%; min-height: 140px;">
+            <div class="resize-handle handle-tl no-print"></div><div class="resize-handle handle-tr no-print"></div><div class="resize-handle handle-bl no-print"></div><div class="resize-handle handle-br no-print"></div>
+            <div class="block-controls no-print drag-handle">⠿ Move Block</div>
+            <div class="inner-clip-wrapper" style="overflow: visible !important;">
+                <div class="flex flex-col items-center justify-center p-1 h-full w-full pointer-events-none">
+                    <div class="profile-pic-frame w-32 h-32 rounded-full border-4 border-sky-400 overflow-hidden bg-gray-100 flex items-center justify-center relative pointer-events-auto transition-all">
+                        <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'><path d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'/><circle cx='12' cy='7' r='4'/></svg>" class="image-render-target w-full h-full object-cover" draggable="false" />
+                        
+                        <label class="no-print absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold cursor-pointer transition-opacity z-50">
+                            Upload Image
+                            <input type="file" accept="image/*" onchange="processLocalImageFile(this)" class="hidden" />
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="resume-block p-3 rounded-lg group" data-type="name" style="width: 100%; min-height: 90px;">
+            <div class="resize-handle handle-tl no-print"></div><div class="resize-handle handle-tr no-print"></div><div class="resize-handle handle-bl no-print"></div><div class="resize-handle handle-br no-print"></div>
+            <div class="block-controls no-print drag-handle">⠿ Move Block</div>
+            <div class="inner-clip-wrapper">
+                <div class="py-1 w-full h-full text-left font-container">
+                    <h2 contenteditable="true" class="text-3xl font-extrabold tracking-tight text-slate-900 focus:outline-none" style="min-height: 36px;">[YOUR NAME]</h2>
+                    <p contenteditable="true" class="text-sm font-bold text-sky-600 tracking-wide uppercase mt-1 focus:outline-none" style="min-height: 20px;">[PROFESSIONAL FIELD TITLE]</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="resume-block p-3 rounded-lg group" data-type="contact" style="width: 100%; min-height: 100px;">
+            <div class="resize-handle handle-tl no-print"></div><div class="resize-handle handle-tr no-print"></div><div class="resize-handle handle-bl no-print"></div><div class="resize-handle handle-br no-print"></div>
+            <div class="block-controls no-print drag-handle">⠿ Move Block</div>
+            <div class="inner-clip-wrapper">
+                <div class="text-xs text-gray-700 space-y-1 py-1 w-full h-full text-left font-container">
+                    <h4 contenteditable="true" class="font-bold text-slate-950 uppercase tracking-wider text-[11px] mb-2 border-b pb-0.5 focus:outline-none">Contact Details</h4>
+                    <div class="space-y-1">
+                        <p contenteditable="true" class="focus:outline-none">📧 email@example.com</p>
+                        <p contenteditable="true" class="focus:outline-none">📞 +00 000 0000 000</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="resume-block p-2 rounded group" data-type="divider" style="width: 100%;">
+            <div class="block-controls no-print drag-handle">⠿ Move Block</div>
+            <div class="inner-clip-wrapper">
+                <div class="py-1 w-full"><hr class="border-t-2 border-sky-400 w-full select-none pointer-events-none" /></div>
+            </div>
+        </div>
+
+        <div class="resume-block p-3 rounded-lg group" data-type="textBlock" style="width: 100%; min-height: 120px;">
+            <div class="resize-handle handle-tl no-print"></div><div class="resize-handle handle-tr no-print"></div><div class="resize-handle handle-bl no-print"></div><div class="resize-handle handle-br no-print"></div>
+            <div class="block-controls no-print drag-handle">⠿ Move Block</div>
+            <div class="inner-clip-wrapper">
+                <div class="w-full h-full text-left font-container">
+                    <h3 contenteditable="true" class="font-bold text-slate-950 text-sm uppercase tracking-wider mb-2 border-b pb-0.5 focus:outline-none" style="min-height: 22px;">Section Title</h3>
+                    <div contenteditable="true" class="text-xs text-gray-700 leading-relaxed whitespace-pre-line focus:outline-none" style="min-height: 40px;">Content Entry Body Text Row</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="resume-block p-1 rounded group" data-type="pageBreak" style="width: 100%;">
+            <div class="py-1.5 no-print flex items-center justify-center gap-2 text-[9px] font-mono font-bold text-purple-600 bg-purple-50 border border-dashed border-purple-300 rounded-lg select-none my-0.5">
+                ✂️ [ --- HARD PAGE BREAK FOR BOUNDARY SCALE --- ] ✂️
+                <button onclick="this.closest('.resume-block').remove(); pushHistoryState();" class="bg-red-200 text-red-800 px-1 py-0.5 rounded text-[8px] hover:bg-red-300 font-sans">Delete</button>
+            </div>
+            <div class="print-page-break hidden"></div>
+        </div>
+    </div>
+
+    <script>
+        let isATSMode = false;
+        let lastActiveBlock = null;
+
+        // Undo/Redo Engine State Stacks
+        let historyStack = [];
+        let redoStack = [];
+
+        // Sortable Setup Config Matrix
+        const sortConfig = { 
+            group: 'document-grid-engine', 
+            animation: 150, 
+            handle: '.drag-handle', 
+            ghostClass: 'sortable-ghost',
+            onEnd: function() { pushHistoryState(); }
+        };
+        let sidebarSortable = new Sortable(document.getElementById('canvasSidebar'), sortConfig);
+        let mainSortable = new Sortable(document.getElementById('canvasMain'), sortConfig);
+
+        window.addEventListener('DOMContentLoaded', () => {
+            pushHistoryState(); // Initial save
+        });
+
+        // Core Document Viewport Mouse Click Handlers
+        document.getElementById('visualWorkspace').addEventListener('click', function(e) {
+            const block = e.target.closest('.resume-block');
+            if (block) {
+                document.querySelectorAll('.resume-block').forEach(b => b.classList.remove('active-block-anchor'));
+                block.classList.add('active-block-anchor');
+                lastActiveBlock = block;
+                synchronizeSidebarInspector(block);
+            }
+        });
+
+        // Sync values from selected element to inspector dashboard
+        function synchronizeSidebarInspector(block) {
+            const panel = document.getElementById('inspectorPanel');
+            const type = block.getAttribute('data-type');
+            
+            document.getElementById('inspectorBlockType').innerText = type.toUpperCase();
+            panel.classList.remove('hidden');
+
+            // Read geometry bounding metric frames
+            document.getElementById('geomWidth').value = Math.round(block.getBoundingClientRect().width);
+            document.getElementById('geomHeight').value = Math.round(block.getBoundingClientRect().height);
+
+            // Container colors mapping
+            let blockBg = window.getComputedStyle(block).backgroundColor;
+            let blockBorder = window.getComputedStyle(block).borderColor;
+            document.getElementById('sidebarBlockBg').value = rgbToHex(blockBg) || "#ffffff";
+            document.getElementById('sidebarBlockBorder').value = rgbToHex(blockBorder) || "#ffffff";
+
+            // Box Shadow Parameters Sync
+            let customBoxBlur = block.getAttribute('data-fx-box-blur') || "0";
+            let customBoxOpacity = block.getAttribute('data-fx-box-opacity') || "40";
+            let customBoxColor = block.getAttribute('data-fx-box-color') || "#000000";
+            document.getElementById('boxShadowBlur').value = customBoxBlur;
+            document.getElementById('boxShadowOpacity').value = customBoxOpacity;
+            document.getElementById('boxShadowColor').value = customBoxColor;
+            document.getElementById('boxBlurDisplay').innerText = customBoxBlur + "px";
+            document.getElementById('boxOpacityDisplay').innerText = customBoxOpacity + "%";
+
+            // Text Shadow Parameters Sync
+            let textShadowEnabled = block.getAttribute('data-fx-text-enabled') === 'true';
+            let customTextBlur = block.getAttribute('data-fx-text-blur') || "0";
+            let customTextColor = block.getAttribute('data-fx-text-color') || "#000000";
+            document.getElementById('enableTextShadow').checked = textShadowEnabled;
+            document.getElementById('textShadowBlur').value = customTextBlur;
+            document.getElementById('textShadowColor').value = customTextColor;
+            document.getElementById('textBlurDisplay').innerText = customTextBlur + "px";
+
+            // Bullet Point Styling Sync
+            let bColor = block.style.getPropertyValue('--bullet-color') || "#0ea5e9";
+            let bSize = block.style.getPropertyValue('--bullet-size') || "1.2em";
+            document.getElementById('bulletColor').value = bColor.trim();
+            document.getElementById('bulletSize').value = parseFloat(bSize) || 1.2;
+
+            // Synch Handle Color representation
+            let handle = block.querySelector('.resize-handle');
+            if(handle) {
+                let handleColor = window.getComputedStyle(handle).borderColor;
+                document.getElementById('sidebarHandleColor').value = rgbToHex(handleColor) || "#7c3aed";
+            }
+        }
+
+        // State Manager: Push structural/style snapshot to History
+        function pushHistoryState() {
+            const sb = document.getElementById('canvasSidebar').innerHTML;
+            const mn = document.getElementById('canvasMain').innerHTML;
+            historyStack.push({sb, mn});
+            if (historyStack.length > 30) historyStack.shift(); 
+            redoStack = [];
+        }
+
+        function undoState() {
+            if (historyStack.length > 1) { 
+                const currentState = historyStack.pop();
+                redoStack.push(currentState);
+                
+                const prevState = historyStack[historyStack.length - 1];
+                document.getElementById('canvasSidebar').innerHTML = prevState.sb;
+                document.getElementById('canvasMain').innerHTML = prevState.mn;
+                reinitializeSystemBindings();
+            }
+        }
+
+        function redoState() {
+            if (redoStack.length > 0) {
+                const nextState = redoStack.pop();
+                historyStack.push(nextState);
+                
+                document.getElementById('canvasSidebar').innerHTML = nextState.sb;
+                document.getElementById('canvasMain').innerHTML = nextState.mn;
+                reinitializeSystemBindings();
+            }
+        }
+
+        function reinitializeSystemBindings() {
+            sidebarSortable.destroy(); 
+            mainSortable.destroy();
+            sidebarSortable = new Sortable(document.getElementById('canvasSidebar'), sortConfig);
+            mainSortable = new Sortable(document.getElementById('canvasMain'), sortConfig);
+            
+            lastActiveBlock = null;
+            document.getElementById('inspectorPanel').classList.add('hidden');
+        }
+
+        // Live Manual Geometry Override Input Mutators
+        function updateActiveBlockGeometry(axis, val) {
+            if (!lastActiveBlock || !val) return;
+            if (axis === 'width') lastActiveBlock.style.width = val + 'px';
+            if (axis === 'height') lastActiveBlock.style.height = val + 'px';
+        }
+
+        // Selection Based Text Formatting
+        function applySelectionInlineStyle(command, value = null) {
+            document.execCommand(command, false, value);
+            // We debounce history saving for typing, but explicit commands can be saved
+            if(command !== 'fontSize' && command !== 'foreColor') pushHistoryState();
+        }
+
+        // List Styling Modifications
+        function applyListStyles() {
+            if (!lastActiveBlock) return;
+            const color = document.getElementById('bulletColor').value;
+            const size = document.getElementById('bulletSize').value + 'em';
+            lastActiveBlock.style.setProperty('--bullet-color', color);
+            lastActiveBlock.style.setProperty('--bullet-size', size);
+        }
+
+        // Shadow & Feather Effects Layer Engine Processing (Separated Box vs Text)
+        function applyBlockEffectsMatrix() {
+            if (!lastActiveBlock) return;
+
+            // --- BOX SHADOW ---
+            let boxBlur = document.getElementById('boxShadowBlur').value;
+            let boxOpacity = document.getElementById('boxShadowOpacity').value / 100;
+            let boxHex = document.getElementById('boxShadowColor').value;
+            
+            document.getElementById('boxBlurDisplay').innerText = boxBlur + "px";
+            document.getElementById('boxOpacityDisplay').innerText = Math.round(boxOpacity * 100) + "%";
+            
+            lastActiveBlock.setAttribute('data-fx-box-blur', boxBlur);
+            lastActiveBlock.setAttribute('data-fx-box-opacity', Math.round(boxOpacity * 100));
+            lastActiveBlock.setAttribute('data-fx-box-color', boxHex);
+
+            let rB = parseInt(boxHex.slice(1, 3), 16);
+            let gB = parseInt(boxHex.slice(3, 5), 16);
+            let bB = parseInt(boxHex.slice(5, 7), 16);
+            let rgbaBox = `rgba(${rB}, ${gB}, ${bB}, ${boxOpacity})`;
+
+            // If it's a photo block, apply the shadow ONLY to the inner rounded picture frame with force !important
+            if (lastActiveBlock.getAttribute('data-type') === 'photo') {
+                lastActiveBlock.style.boxShadow = "none";
+                let picFrame = lastActiveBlock.querySelector('.profile-pic-frame');
+                if (picFrame) {
+                    if (boxBlur == 0 && boxOpacity == 0) {
+                        picFrame.style.boxShadow = "none";
+                    } else {
+                        picFrame.style.setProperty('box-shadow', `0px ${Math.round(boxBlur/3)}px ${boxBlur}px ${rgbaBox}`, 'important');
+                    }
+                }
+            } else {
+                // Regular structural containers
+                if (boxBlur == 0 && boxOpacity == 0) {
+                    lastActiveBlock.style.boxShadow = "none";
+                } else {
+                    lastActiveBlock.style.boxShadow = `0px ${Math.round(boxBlur/3)}px ${boxBlur}px ${rgbaBox}`;
+                }
+            }
+
+            // --- TEXT SHADOW ---
+            let textEnabled = document.getElementById('enableTextShadow').checked;
+            let textBlur = document.getElementById('textShadowBlur').value;
+            let textHex = document.getElementById('textShadowColor').value;
+
+            document.getElementById('textBlurDisplay').innerText = textBlur + "px";
+
+            lastActiveBlock.setAttribute('data-fx-text-enabled', textEnabled);
+            lastActiveBlock.setAttribute('data-fx-text-blur', textBlur);
+            lastActiveBlock.setAttribute('data-fx-text-color', textHex);
+
+            let textElements = lastActiveBlock.querySelectorAll('h2, h3, p, div[contenteditable], li');
+            if (textEnabled) {
+                let rT = parseInt(textHex.slice(1, 3), 16);
+                let gT = parseInt(textHex.slice(3, 5), 16);
+                let bT = parseInt(textHex.slice(5, 7), 16);
+                let rgbaText = `rgba(${rT}, ${gT}, ${bT}, 0.8)`; // Text needs higher opacity normally to be seen
+                
+                textElements.forEach(el => {
+                    el.style.textShadow = textBlur > 0 ? `0px 1px ${textBlur}px ${rgbaText}` : `0px 1px 2px ${rgbaText}`;
+                });
+            } else {
+                textElements.forEach(el => el.style.textShadow = "none");
+            }
+        }
+
+        // Structural Shape Shell Styles Mutators
+        function modifyActiveBlockShellStyle(property, val) {
+            if (!lastActiveBlock || !val) return;
+            if (property === 'bg') lastActiveBlock.style.backgroundColor = val;
+            if (property === 'border') {
+                lastActiveBlock.style.borderColor = val;
+                lastActiveBlock.style.borderWidth = '2px';
+                lastActiveBlock.style.borderStyle = 'solid';
+            }
+            if (property === 'handles') {
+                lastActiveBlock.querySelectorAll('.resize-handle').forEach(h => {
+                    h.style.borderColor = val + " !important";
+                    h.style.setProperty('border-color', val, 'important');
+                });
+            }
+        }
+
+        function restoreAutoContainerFlow() {
+            if (!lastActiveBlock) return;
+            lastActiveBlock.style.width = '100%';
+            lastActiveBlock.style.height = 'auto';
+            
+            // Re-read current updated flow footprint coordinates
+            document.getElementById('geomWidth').value = Math.round(lastActiveBlock.getBoundingClientRect().width);
+            document.getElementById('geomHeight').value = Math.round(lastActiveBlock.getBoundingClientRect().height);
+            alertSystemStatus("⚡ Reset layout geometry constraints to dynamic auto-scaling flow parameters.");
+            pushHistoryState();
+        }
+
+        function duplicateActiveContainerBlock() { 
+            if (!lastActiveBlock) return;
+            const clone = lastActiveBlock.cloneNode(true);
+            clone.classList.remove('active-block-anchor');
+            lastActiveBlock.parentNode.insertBefore(clone, lastActiveBlock.nextSibling);
+            pushHistoryState();
+        }
+        
+        function purgeActiveContainerBlock() {
+            if (lastActiveBlock) {
+                lastActiveBlock.remove();
+                lastActiveBlock = null;
+                document.getElementById('inspectorPanel').classList.add('hidden');
+                pushHistoryState();
+            }
+        }
+
+        /* 🛠️ ROBUST MOUSE POINTER DRAG RESIZE MATRIX ENGINE */
+        let currentResizer = null;
+        let resizeTargetBlock = null;
+        let rStartX, rStartY, rStartW, rStartH;
+
+        document.addEventListener('mousedown', function(e) {
+            if (e.target.classList.contains('resize-handle')) {
+                e.preventDefault();
+                e.stopPropagation();
+                currentResizer = e.target;
+                resizeTargetBlock = currentResizer.closest('.resume-block');
+                
+                rStartX = e.clientX;
+                rStartY = e.clientY;
+                rStartW = resizeTargetBlock.getBoundingClientRect().width;
+                rStartH = resizeTargetBlock.getBoundingClientRect().height;
+                
+                document.addEventListener('mousemove', processPointerResizeExecution);
+                document.addEventListener('mouseup', terminatePointerResizeLoop);
+            }
+        });
+
+        function processPointerResizeExecution(e) {
+            if (!resizeTargetBlock || !currentResizer) return;
+            const deltaX = e.clientX - rStartX;
+            const deltaY = e.clientY - rStartY;
+
+            let finalW = rStartW;
+            let finalH = rStartH;
+
+            if (currentResizer.classList.contains('handle-br')) {
+                finalW = rStartW + deltaX; finalH = rStartH + deltaY;
+            } else if (currentResizer.classList.contains('handle-bl')) {
+                finalW = rStartW - deltaX; finalH = rStartH + deltaY;
+            } else if (currentResizer.classList.contains('handle-tr')) {
+                finalW = rStartW + deltaX; finalH = rStartH - deltaY;
+            } else if (currentResizer.classList.contains('handle-tl')) {
+                finalW = rStartW - deltaX; finalH = rStartH - deltaY;
+            }
+
+            resizeTargetBlock.style.width = finalW + 'px';
+            resizeTargetBlock.style.height = finalH + 'px';
+
+            // Real-time update into numerical entry panel counters
+            document.getElementById('geomWidth').value = Math.round(finalW);
+            document.getElementById('geomHeight').value = Math.round(finalH);
+        }
+
+        function terminatePointerResizeLoop() {
+            document.removeEventListener('mousemove', processPointerResizeExecution);
+            document.removeEventListener('mouseup', terminatePointerResizeLoop);
+            currentResizer = null;
+            resizeTargetBlock = null;
+            pushHistoryState(); // Save state post-resize
+        }
+
+        // Functional Component Generators
+        function createNewComponent(type, defaultDestination = 'canvasMain') {
+            const blueprint = document.querySelector(`#blueprintRepository [data-type="${type}"]`);
+            if (!blueprint) return null;
+            const clone = blueprint.cloneNode(true);
+            
+            if (lastActiveBlock && document.getElementById('visualWorkspace').contains(lastActiveBlock)) {
+                lastActiveBlock.parentNode.insertBefore(clone, lastActiveBlock.nextSibling);
+            } else {
+                document.getElementById(defaultDestination).appendChild(clone);
+            }
+
+            document.querySelectorAll('.resume-block').forEach(b => b.classList.remove('active-block-anchor'));
+            clone.classList.add('active-block-anchor');
+            lastActiveBlock = clone;
+            synchronizeSidebarInspector(clone);
+            pushHistoryState();
+            return clone;
+        }
+
+        function adjustMasterColumnMatrix(columnId, property, value) {
+            const col = document.getElementById(columnId);
+            if (!col) return;
+            if (property === 'bg') col.style.backgroundColor = value;
+            if (property === 'border') {
+                col.style.borderColor = value;
+                col.style.borderWidth = '2px';
+                col.style.borderStyle = 'solid';
+            }
+        }
+
+        function processLocalImageFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) { 
+                const targetImg = input.closest('.resume-block').querySelector('.image-render-target');
+                targetImg.src = e.target.result; 
+                targetImg.setAttribute('src', e.target.result); 
+                input.value = ''; // Reset input so identical file selects fire correctly
+                pushHistoryState();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function rgbToHex(rgb) {
+            if (!rgb || rgb === 'rgba(0, 0, 0, 0)' || rgb === 'transparent') return '#ffffff';
+            const matches = rgb.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+            if (!matches) return '#ffffff';
+            return "#" + ("0" + parseInt(matches[1],10).toString(16)).slice(-2) +
+                         ("0" + parseInt(matches[2],10).toString(16)).slice(-2) +
+                         ("0" + parseInt(matches[3],10).toString(16)).slice(-2);
+        }
+
+        function saveProjectWorkspace() {
+            const projectData = {
+                sidebarHTML: document.getElementById('canvasSidebar').innerHTML,
+                mainHTML: document.getElementById('canvasMain').innerHTML,
+                sidebarStyle: document.getElementById('canvasSidebar').style.cssText,
+                mainStyle: document.getElementById('canvasMain').style.cssText
+            };
+            const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: "application/json" });
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.href = URL.createObjectURL(blob);
+            downloadAnchor.download = "resume_studio_workspace.json";
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
+        function loadProjectWorkspace(evt) {
+            const file = evt.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.sidebarHTML && data.mainHTML) {
+                        const sb = document.getElementById('canvasSidebar');
+                        const mn = document.getElementById('canvasMain');
+                        sb.innerHTML = data.sidebarHTML;
+                        mn.innerHTML = data.mainHTML;
+                        if (data.sidebarStyle) sb.style.cssText = data.sidebarStyle;
+                        if (data.mainStyle) mn.style.cssText = data.mainStyle;
+                        
+                        reinitializeSystemBindings();
+                        pushHistoryState();
+                        alertSystemStatus("⚡ Workspace blueprint loaded successfully.");
+                    }
+                } catch(err) {
+                    alertSystemStatus("❌ Error decoding template configuration matrix.");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function alertSystemStatus(msg) {
+            const alertBox = document.getElementById('statusAlert');
+            alertBox.classList.remove('hidden');
+            alertBox.innerText = msg;
+            setTimeout(() => alertBox.classList.add('hidden'), 4000);
+        }
+
+        function toggleLayoutEngine() {
+            const visualWorkspace = document.getElementById('visualWorkspace');
+            const atsWorkspace = document.getElementById('atsWorkspace');
+            const toggleBtn = document.getElementById('atsToggleBtn');
+            isATSMode = !isATSMode;
+            
+            if (isATSMode) {
+                toggleBtn.innerHTML = "<span>🎨</span> Return to Design Canvas";
+                toggleBtn.className = "w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2 rounded-lg text-xs shadow transition-all flex items-center justify-center gap-1.5";
+                atsWorkspace.innerHTML = "";
+                
+                document.querySelectorAll('#visualWorkspace [data-type="name"]').forEach(b => {
+                    atsWorkspace.innerHTML += `<h1 style="font-size: 26px; font-weight: bold; margin-bottom: 2px;">${b.querySelector('h2').innerText}</h1>`;
+                    atsWorkspace.innerHTML += `<p style="font-size: 14px; font-weight: bold; color: #4b5563; text-transform: uppercase; margin-bottom: 12px;">${b.querySelector('p').innerText}</p>`;
+                });
+
+                document.querySelectorAll('#visualWorkspace [data-type="contact"]').forEach(b => {
+                    atsWorkspace.innerHTML += `<p style="font-size: 11px; color: #374151; margin-bottom: 24px; border-bottom: 1px solid #d1d5db; padding-bottom: 8px;">${Array.from(b.querySelectorAll('p')).map(p => p.innerText).join('   |   ')}</p>`;
+                });
+
+                const processBlocksFromContainer = (id) => {
+                    document.querySelectorAll(`#${id} [data-type="textBlock"]`).forEach(b => {
+                        atsWorkspace.innerHTML += `
+                            <div style="margin-bottom: 20px;">
+                                <h3 style="font-size: 12px; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #111827; padding-bottom: 2px; margin-bottom: 6px; letter-spacing: 0.05em;">${b.querySelector('h3').innerText}</h3>
+                                <div style="font-size: 11px; line-height: 1.6; color: #1f2937; white-space: pre-line;">${b.querySelector('div[contenteditable]').innerText}</div>
+                            </div>`;
+                    });
+                };
+                processBlocksFromContainer('canvasSidebar');
+                processBlocksFromContainer('canvasMain');
+                visualWorkspace.classList.add('hidden');
+                atsWorkspace.classList.remove('hidden');
+            } else {
+                toggleBtn.innerHTML = "<span>🤖</span> Generate ATS Text Engine";
+                toggleBtn.className = "w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-lg text-xs shadow transition-all flex items-center justify-center gap-1.5";
+                visualWorkspace.classList.remove('hidden');
+                atsWorkspace.classList.add('hidden');
+            }
+        }
+
+        // Native PDF.js processing engine pipelines
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        document.getElementById('fileInput').addEventListener('change', function(evt) {
+            const file = evt.target.files[0];
+            if (!file) return;
+            const ext = file.name.split('.').pop().toLowerCase();
+            alertSystemStatus("[PARSING FILE METRICS STREAM]");
+            const reader = new FileReader();
+            if (ext === 'pdf') {
+                reader.onload = function(e) {
+                    const typedArray = new Uint8Array(e.target.result);
+                    pdfjsLib.getDocument(typedArray).promise.then(function(pdf) {
+                        let parsePromises = [];
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            parsePromises.push(pdf.getPage(i).then(p => p.getTextContent().then(t => t.items.map(item => item.str).join(' '))));
+                        }
+                        Promise.all(parsePromises).then(pagesText => executeHeuristicPopulation(pagesText.join('\n')));
+                    });
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                reader.onload = function(e) { executeHeuristicPopulation(e.target.result); };
+                reader.readAsText(file);
+            }
+        });
+
+        function executeHeuristicPopulation(text) {
+            document.getElementById('canvasSidebar').innerHTML = '';
+            document.getElementById('canvasMain').innerHTML = '';
+            lastActiveBlock = null;
+            document.getElementById('inspectorPanel').classList.add('hidden');
+            
+            createNewComponent('photo', 'canvasSidebar');
+
+            let lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            let extractedName = lines[0] ? lines[0].toUpperCase() : "APPLICANT NAME";
+            let extractedTitle = lines[1] ? lines[1].toUpperCase() : "PROFESSIONAL FIELD SPECIALIST";
+
+            const nCard = createNewComponent('name', 'canvasMain');
+            nCard.querySelector('h2').innerText = extractedName; 
+            nCard.querySelector('p').innerText = extractedTitle;
+
+            const cCard = createNewComponent('contact', 'canvasSidebar');
+            let contactLines = [];
+            let emails = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+            if (emails) emails.forEach(e => contactLines.push("📧 " + e));
+            let phones = text.match(/\+?\d[\d\s-]{8,15}\d/g);
+            if (phones) phones.slice(0, 2).forEach(p => contactLines.push("📞 " + p.trim()));
+            if (contactLines.length === 0) contactLines = ["📧 email@example.com", "📞 +00 000 0000 000"];
+            cCard.querySelector('.space-y-1').innerHTML = contactLines.map(l => `<p contenteditable="true" class="focus:outline-none">${l}</p>`).join('');
+
+            const jCard = createNewComponent('textBlock', 'canvasMain');
+            jCard.querySelector('h3').innerText = "Professional Experience Chronicle";
+            jCard.querySelector('div[contenteditable]').innerText = text.slice(0, 600) + "...";
+            
+            document.querySelectorAll('.resume-block').forEach(b => b.classList.remove('active-block-anchor'));
+            lastActiveBlock = null;
+            alertSystemStatus("⚡ Raw parameters synthesized directly into Document Layout.");
+            pushHistoryState();
+        }
+    </script>
+</body>
+</html>
