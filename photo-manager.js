@@ -1,5 +1,7 @@
 (function(){
-  var VERSION = '2.11';
+  var VERSION = '2.12';
+  var observerStarted = false;
+  var cleanupTimer = null;
 
   function status(message){
     if(window.ResumeStudio && window.ResumeStudio.status) window.ResumeStudio.status(message);
@@ -15,6 +17,80 @@
 
   function cssUrl(value){
     return 'url("' + String(value).replace(/"/g, '%22') + '")';
+  }
+
+  function injectCleanupCss(){
+    if(document.getElementById('resume-studio-cleanup-css')) return;
+    var style = document.createElement('style');
+    style.id = 'resume-studio-cleanup-css';
+    style.textContent = '.resume-block li.rs-empty-li,.resume-block li:empty{display:none!important;margin:0!important;padding:0!important;height:0!important;min-height:0!important}.resume-block li.rs-empty-li::before,.resume-block li:empty::before{display:none!important;content:""!important}.resume-block li.rs-empty-li *{display:none!important}';
+    document.head.appendChild(style);
+  }
+
+  function visibleText(node){
+    return (node ? node.textContent : '')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function isEmptyListItem(li){
+    if(!li) return false;
+    var text = visibleText(li);
+    if(text) return false;
+    var meaningful = li.querySelector('img,svg,canvas,video,input,textarea,select,button');
+    if(meaningful) return false;
+    return true;
+  }
+
+  function cleanupEmptyListItems(root){
+    root = root || document.getElementById('visualWorkspace') || document;
+    var removed = 0;
+    root.querySelectorAll('li').forEach(function(li){
+      if(isEmptyListItem(li)){
+        li.classList.add('rs-empty-li');
+        li.remove();
+        removed++;
+      }
+    });
+    return removed;
+  }
+
+  function cleanupSoon(reason){
+    clearTimeout(cleanupTimer);
+    cleanupTimer = setTimeout(function(){
+      var removed = cleanupEmptyListItems();
+      if(removed) status('Removed ' + removed + ' empty bullet line' + (removed === 1 ? '' : 's') + '.');
+    }, 80);
+  }
+
+  function startCleanupObserver(){
+    if(observerStarted) return;
+    observerStarted = true;
+    injectCleanupCss();
+    cleanupEmptyListItems();
+
+    var workspace = document.getElementById('visualWorkspace');
+    if(workspace){
+      workspace.addEventListener('input', function(){ cleanupSoon('input'); }, true);
+      var observer = new MutationObserver(function(){ cleanupSoon('mutation'); });
+      observer.observe(workspace, { childList:true, subtree:true });
+    }
+
+    ['loadProjectWorkspace','openWorkspaceFromDisk','undoState','redoState','saveProjectWorkspace','saveWorkspaceOverDisk','saveWorkspaceAsDisk','printNormalPdf','printAtsPdf'].forEach(function(name){
+      var original = window[name];
+      if(typeof original !== 'function' || original._cleanupWrapped) return;
+      var wrapped = function(){
+        cleanupEmptyListItems();
+        var result = original.apply(this, arguments);
+        setTimeout(function(){ cleanupEmptyListItems(); }, 150);
+        setTimeout(function(){ cleanupEmptyListItems(); }, 700);
+        return result;
+      };
+      wrapped._cleanupWrapped = true;
+      window[name] = wrapped;
+    });
   }
 
   function closestBlock(node){
@@ -122,11 +198,13 @@
         img.removeAttribute('src');
         img.style.setProperty('display', 'none', 'important');
       }
+      cleanupEmptyListItems();
       if(window.ResumeStudio && window.ResumeStudio.pushHistoryState) window.ResumeStudio.pushHistoryState();
       status('Photo visible and saved into workspace data.');
       URL.revokeObjectURL(objectUrl);
     };
     reader.onerror = function(){
+      cleanupEmptyListItems();
       if(window.ResumeStudio && window.ResumeStudio.pushHistoryState) window.ResumeStudio.pushHistoryState();
       status('Photo visible, but embedded copy failed. The preview is still applied.');
     };
@@ -135,6 +213,7 @@
 
   function bind(){
     markVersion();
+    startCleanupObserver();
     var button = document.getElementById('photoUploadButton');
     var input = document.getElementById('photoUploadInput');
     if(button && input && !button.dataset.photoManagerBound){
@@ -146,7 +225,7 @@
         input.value = '';
       });
     }
-    status('Photo manager v' + VERSION + ' active.');
+    status('Photo manager v' + VERSION + ' active. Empty bullet cleanup enabled.');
   }
 
   function updateBlockStyle(input, kind){
@@ -163,6 +242,7 @@
       var hr = block.querySelector('hr,.divider-target');
       if(hr) hr.style.borderColor = val;
     }
+    cleanupEmptyListItems();
     if(window.ResumeStudio && window.ResumeStudio.pushHistoryState) window.ResumeStudio.pushHistoryState();
   }
 
@@ -172,6 +252,7 @@
     var clone = block.cloneNode(true);
     clone.classList.remove('active-block-anchor');
     block.parentElement.insertBefore(clone, block.nextSibling);
+    cleanupEmptyListItems();
     if(window.ResumeStudio && window.ResumeStudio.pushHistoryState) window.ResumeStudio.pushHistoryState();
   }
 
@@ -189,7 +270,7 @@
     return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
   }
 
-  window.PhotoManager = { applyPhotoFile: applyPhotoFile, processLocalImage: processLocalImage };
+  window.PhotoManager = { applyPhotoFile: applyPhotoFile, processLocalImage: processLocalImage, cleanupEmptyListItems: cleanupEmptyListItems };
   window.processLocalImage = processLocalImage;
   window.processLocalImageFile = processLocalImage;
   window.processGlobalPhotoFile = function(input){ processLocalImage(input); };
