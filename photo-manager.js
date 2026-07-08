@@ -1,5 +1,5 @@
 (function(){
-  var VERSION = '2.12';
+  var VERSION = '2.13';
   var observerStarted = false;
   var cleanupTimer = null;
 
@@ -24,6 +24,14 @@
     var style = document.createElement('style');
     style.id = 'resume-studio-cleanup-css';
     style.textContent = '.resume-block li.rs-empty-li,.resume-block li:empty{display:none!important;margin:0!important;padding:0!important;height:0!important;min-height:0!important}.resume-block li.rs-empty-li::before,.resume-block li:empty::before{display:none!important;content:""!important}.resume-block li.rs-empty-li *{display:none!important}';
+    document.head.appendChild(style);
+  }
+
+  function injectBulletSpacingCss(){
+    if(document.getElementById('resume-studio-bullet-spacing-css')) return;
+    var style = document.createElement('style');
+    style.id = 'resume-studio-bullet-spacing-css';
+    style.textContent = '.resume-block.rs-bullet-spacing-enabled li + li{margin-top:var(--bullet-section-spacing,8px)!important}.resume-block.rs-bullet-spacing-enabled li{line-height:inherit}.resume-block.rs-bullet-spacing-enabled p,.resume-block.rs-bullet-spacing-enabled div[contenteditable]{line-height:inherit}';
     document.head.appendChild(style);
   }
 
@@ -84,13 +92,101 @@
       var wrapped = function(){
         cleanupEmptyListItems();
         var result = original.apply(this, arguments);
-        setTimeout(function(){ cleanupEmptyListItems(); }, 150);
-        setTimeout(function(){ cleanupEmptyListItems(); }, 700);
+        setTimeout(function(){ cleanupEmptyListItems(); syncBulletSpacingControls(); }, 150);
+        setTimeout(function(){ cleanupEmptyListItems(); syncBulletSpacingControls(); }, 700);
         return result;
       };
       wrapped._cleanupWrapped = true;
       window[name] = wrapped;
     });
+  }
+
+  function findBulletOptionsPanel(){
+    var labels = Array.from(document.querySelectorAll('p,h2,h3,div'));
+    for(var i = 0; i < labels.length; i++){
+      var text = (labels[i].innerText || labels[i].textContent || '').trim();
+      if(text.indexOf('Bullet Options') >= 0){
+        return labels[i].closest('.space-y-2') || labels[i].parentElement;
+      }
+    }
+    return null;
+  }
+
+  function getActiveBlock(){
+    return document.querySelector('#visualWorkspace .resume-block.active-block-anchor');
+  }
+
+  function setBulletSectionSpacing(enabled, px){
+    var block = getActiveBlock();
+    if(!block){
+      status('Select the bullet/text block first, then adjust bullet section spacing.');
+      syncBulletSpacingControls();
+      return;
+    }
+    var value = Math.max(0, Math.min(40, Number(px || 0)));
+    if(enabled){
+      block.classList.add('rs-bullet-spacing-enabled');
+      block.style.setProperty('--bullet-section-spacing', value + 'px');
+      block.setAttribute('data-bullet-section-spacing-enabled', 'true');
+      block.setAttribute('data-bullet-section-spacing', String(value));
+    } else {
+      block.classList.remove('rs-bullet-spacing-enabled');
+      block.style.removeProperty('--bullet-section-spacing');
+      block.setAttribute('data-bullet-section-spacing-enabled', 'false');
+      block.removeAttribute('data-bullet-section-spacing');
+    }
+    cleanupEmptyListItems(block);
+    if(window.ResumeStudio && window.ResumeStudio.pushHistoryState) window.ResumeStudio.pushHistoryState();
+  }
+
+  function syncBulletSpacingControls(){
+    var toggle = document.getElementById('bulletSectionSpacingToggle');
+    var range = document.getElementById('bulletSectionSpacingSlider');
+    var value = document.getElementById('bulletSectionSpacingValue');
+    if(!toggle || !range || !value) return;
+    var block = getActiveBlock();
+    var enabled = !!(block && (block.classList.contains('rs-bullet-spacing-enabled') || block.getAttribute('data-bullet-section-spacing-enabled') === 'true'));
+    var px = block ? Number(block.getAttribute('data-bullet-section-spacing') || parseInt(block.style.getPropertyValue('--bullet-section-spacing'), 10) || 8) : 8;
+    toggle.checked = enabled;
+    range.value = String(px);
+    range.disabled = !enabled;
+    range.classList.toggle('opacity-40', !enabled);
+    value.innerText = px + 'px';
+  }
+
+  function injectBulletSpacingControls(){
+    injectBulletSpacingCss();
+    if(document.getElementById('bulletSectionSpacingControls')) return;
+    var panel = findBulletOptionsPanel();
+    if(!panel) return;
+    var box = document.createElement('div');
+    box.id = 'bulletSectionSpacingControls';
+    box.className = 'mt-2 pt-2 border-t border-slate-800 space-y-2';
+    box.innerHTML = '<label class="flex items-center justify-between gap-2 text-slate-400 text-[10px]"><span>Space between bullet sections</span><input id="bulletSectionSpacingToggle" type="checkbox" class="accent-cyan-500"></label><div class="flex justify-between text-[10px] text-slate-400"><span>Section gap:</span><span id="bulletSectionSpacingValue" class="font-mono text-cyan-400">8px</span></div><input id="bulletSectionSpacingSlider" type="range" min="0" max="40" value="8" class="w-full accent-cyan-500 bg-slate-800 h-1 rounded opacity-40" disabled><p class="text-[9px] text-slate-500 leading-tight">Adds margin between bullet items only. It does not change normal wrapped text line spacing.</p>';
+    panel.appendChild(box);
+
+    var toggle = document.getElementById('bulletSectionSpacingToggle');
+    var slider = document.getElementById('bulletSectionSpacingSlider');
+    toggle.addEventListener('change', function(){
+      slider.disabled = !toggle.checked;
+      slider.classList.toggle('opacity-40', !toggle.checked);
+      setBulletSectionSpacing(toggle.checked, slider.value);
+      syncBulletSpacingControls();
+    });
+    slider.addEventListener('input', function(){
+      document.getElementById('bulletSectionSpacingValue').innerText = slider.value + 'px';
+      setBulletSectionSpacing(toggle.checked, slider.value);
+    });
+    syncBulletSpacingControls();
+  }
+
+  function startBulletSpacingManager(){
+    injectBulletSpacingControls();
+    document.addEventListener('click', function(){ setTimeout(syncBulletSpacingControls, 0); }, true);
+    var workspace = document.getElementById('visualWorkspace');
+    if(workspace){
+      workspace.addEventListener('input', function(){ cleanupEmptyListItems(); }, true);
+    }
   }
 
   function closestBlock(node){
@@ -214,6 +310,7 @@
   function bind(){
     markVersion();
     startCleanupObserver();
+    startBulletSpacingManager();
     var button = document.getElementById('photoUploadButton');
     var input = document.getElementById('photoUploadInput');
     if(button && input && !button.dataset.photoManagerBound){
@@ -225,7 +322,7 @@
         input.value = '';
       });
     }
-    status('Photo manager v' + VERSION + ' active. Empty bullet cleanup enabled.');
+    status('Photo manager v' + VERSION + ' active. Bullet section spacing control enabled.');
   }
 
   function updateBlockStyle(input, kind){
@@ -270,7 +367,7 @@
     return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
   }
 
-  window.PhotoManager = { applyPhotoFile: applyPhotoFile, processLocalImage: processLocalImage, cleanupEmptyListItems: cleanupEmptyListItems };
+  window.PhotoManager = { applyPhotoFile: applyPhotoFile, processLocalImage: processLocalImage, cleanupEmptyListItems: cleanupEmptyListItems, setBulletSectionSpacing: setBulletSectionSpacing };
   window.processLocalImage = processLocalImage;
   window.processLocalImageFile = processLocalImage;
   window.processGlobalPhotoFile = function(input){ processLocalImage(input); };
