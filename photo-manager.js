@@ -1,7 +1,16 @@
 (function(){
+  var VERSION = '2.11';
+
   function status(message){
     if(window.ResumeStudio && window.ResumeStudio.status) window.ResumeStudio.status(message);
     else console.log('[PhotoManager]', message);
+  }
+
+  function markVersion(){
+    document.title = 'Resume Studio v' + VERSION;
+    Array.from(document.querySelectorAll('span')).forEach(function(span){
+      if(/^v\d+\.\d+$/.test((span.innerText || '').trim())) span.innerText = 'v' + VERSION;
+    });
   }
 
   function cssUrl(value){
@@ -125,6 +134,7 @@
   }
 
   function bind(){
+    markVersion();
     var button = document.getElementById('photoUploadButton');
     var input = document.getElementById('photoUploadInput');
     if(button && input && !button.dataset.photoManagerBound){
@@ -136,6 +146,7 @@
         input.value = '';
       });
     }
+    status('Photo manager v' + VERSION + ' active.');
   }
 
   function updateBlockStyle(input, kind){
